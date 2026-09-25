@@ -1,0 +1,38 @@
+# Tags each release automatically: when the `release` branch moves and
+# package.json has a version with no matching tag yet, create `v<version>`
+# on that commit and publish a GitHub Release with generated notes.
+name: Tag release
+
+on:
+  push:
+    branches: [release]
+
+permissions:
+  contents: write
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        id: version
+        run: echo "tag=v$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Create tag and release if new
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "$TAG already exists; nothing to do."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG" "$GITHUB_SHA"
+          git push origin "$TAG"
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes

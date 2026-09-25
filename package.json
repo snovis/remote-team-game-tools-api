@@ -1,0 +1,18 @@
+{
+  "name": "remote-team-game-tools-api",
+  "version": "0.1.0",
+  "description": "Everything a remote-team multiplayer party game needs except the game: Jackbox-style rooms, rejoin, host handoff, server clock, build sync, lobby UI, wheels, and animation kit.",
+  "type": "module",
+  "exports": {
+    ".": "./server/index.js",
+    "./rooms": "./server/rooms.js"
+  },
+  "files": ["server", "client", "GAME_API.md"],
+  "scripts": {
+    "test": "node --test test/",
+    "example": "node examples/hidden-number/server.js"
+  },
+  "engines": { "node": ">=20" },
+  "dependencies": { "ws": "^8.18.0" },
+  "license": "GPL-3.0-only"
+}

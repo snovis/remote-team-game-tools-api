@@ -1,0 +1,92 @@
+/* Client kit base styles: home, lobby, badge, toast, wheel. Neutral by
+   design — override the --rtg-* variables (or any class) to theme a game. */
+:root {
+  --rtg-bg: #1f2430;
+  --rtg-panel: #fbf7ee;
+  --rtg-ink: #22201c;
+  --rtg-muted: #7a7160;
+  --rtg-line: #ddd2bb;
+  --rtg-accent: #d2402f;
+  --rtg-accent-dk: #8e2419;
+  --rtg-edge: #3a2a1a;
+  --rtg-title: #f2c14e;
+  --rtg-font: system-ui, -apple-system, "Segoe UI", sans-serif;
+  --rtg-display: var(--rtg-font);
+  --rtg-radius: 16px;
+  --rtg-shadow: 0 5px 0 rgb(0 0 0 / .22), 0 12px 24px rgb(0 0 0 / .28);
+}
+body { margin: 0; background: var(--rtg-bg); color: var(--rtg-ink); font: 500 16px/1.4 var(--rtg-font); -webkit-tap-highlight-color: transparent; }
+.rtg-muted { color: var(--rtg-muted); }
+.rtg-center { text-align: center; }
+h1, h2 { font-family: var(--rtg-display); line-height: 1.1; margin: 0 0 .5em; text-wrap: balance; }
+
+.rtg-btn {
+  font: 600 1rem var(--rtg-font); cursor: pointer; color: var(--rtg-ink);
+  background: var(--rtg-panel); border: 2.5px solid var(--rtg-edge); border-radius: 14px;
+  padding: .65em 1.3em; box-shadow: 0 4px 0 var(--rtg-edge); transition: transform .06s, box-shadow .06s;
+}
+.rtg-btn:active:not(:disabled) { transform: translateY(3px); box-shadow: 0 1px 0 var(--rtg-edge); }
+.rtg-btn:disabled { opacity: .5; cursor: not-allowed; }
+.rtg-btn.primary { background: var(--rtg-accent); color: #fff; border-color: var(--rtg-accent-dk); box-shadow: 0 4px 0 var(--rtg-accent-dk); }
+.rtg-btn.ghost { background: transparent; box-shadow: none; }
+.rtg-btn.small { padding: .45em .9em; font-size: .9rem; }
+.rtg-btn.wide { width: 100%; }
+.rtg-panel { background: var(--rtg-panel); border: 2.5px solid var(--rtg-edge); border-radius: var(--rtg-radius); box-shadow: var(--rtg-shadow); padding: 1.1rem; }
+.rtg-field { display: grid; gap: .3em; font-size: .85rem; color: var(--rtg-muted); font-weight: 600; }
+.rtg-field input, .rtg-field select, .rtg-code {
+  font: 500 1rem var(--rtg-font); color: var(--rtg-ink); background: #fff;
+  border: 2px solid var(--rtg-line); border-radius: 10px; padding: .6em .8em; width: 100%; box-sizing: border-box;
+}
+
+.rtg-home, .rtg-lobby { max-width: 500px; margin: 0 auto; padding: 28px 20px 60px; display: grid; gap: 18px; box-sizing: border-box; }
+.rtg-hero { text-align: center; }
+.rtg-hero h1 { font-size: clamp(2.1rem, 8.5vw, 3rem); color: var(--rtg-title); }
+.rtg-tag { color: #fff; opacity: .85; margin: 0; text-wrap: balance; }
+.rtg-logo { display: block; margin: 0 auto .6em; }
+.rtg-join { display: grid; gap: 12px; }
+.rtg-join-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.rtg-code { text-transform: uppercase; letter-spacing: .3em; font-weight: 700; text-align: center; }
+.rtg-or { display: flex; align-items: center; gap: .6em; color: var(--rtg-muted); font-size: .8rem; }
+.rtg-or::before, .rtg-or::after { content: ""; flex: 1; height: 1.5px; background: var(--rtg-line); }
+.rtg-how { color: #fff; opacity: .9; }
+
+.rtg-lobby-head { text-align: center; color: #fff; }
+.rtg-lobby-head .rtg-muted { color: #fff; opacity: .7; margin: 0; }
+.rtg-big-code { font-family: var(--rtg-display); font-size: 3.4rem; font-weight: 800; letter-spacing: .18em; color: var(--rtg-title); margin: .05em 0 .2em .18em; }
+.rtg-players { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 12px; }
+.rtg-players li { display: flex; align-items: center; gap: .5em; font-weight: 600; min-width: 0; }
+.rtg-players li.away { opacity: .4; }
+.rtg-players em { font-style: normal; font-size: .72rem; color: var(--rtg-muted); border: 1.5px solid var(--rtg-line); border-radius: 99px; padding: 0 .5em; }
+.rtg-swatch { display: inline-block; width: .9em; height: .9em; border-radius: 50%; background: var(--c); flex: none; }
+.rtg-settings { display: grid; gap: 10px; margin-bottom: 14px; }
+.rtg-leave { justify-self: center; color: #fff; border-color: rgb(255 255 255 / .4); }
+
+#rtg-toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translate(-50%, 30px); opacity: 0; z-index: 80;
+  background: var(--rtg-ink); color: #fff; padding: .6em 1.1em; border-radius: 12px; font-weight: 600;
+  transition: .25s; pointer-events: none; max-width: calc(100% - 40px);
+}
+#rtg-toast.show { opacity: 1; transform: translate(-50%, 0); }
+
+/* Build badge: which code is this page running, and does it match the server? */
+#rtg-build {
+  position: fixed; right: 16px; bottom: 14px; z-index: 35; cursor: default;
+  font: 600 .7rem/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: .04em;
+  color: #b9f5c9; background: rgb(0 0 0 / .35); border: 1px solid rgb(126 226 162 / .45);
+  border-radius: 99px; padding: .35em .7em; user-select: all;
+}
+#rtg-build.stale { cursor: pointer; color: #fff; background: #d2402f; border-color: #8e2419; font-size: .8rem; padding: .5em .9em; }
+
+.rtg-wheel-wrap { position: relative; width: min(290px, 74vw); filter: drop-shadow(0 8px 10px rgb(0 0 0 / .35)); }
+.rtg-pointer { position: absolute; top: -14px; left: 50%; transform: translateX(-50%); transform-origin: 50% 20%; z-index: 2; font-size: 2rem; color: var(--rtg-accent); }
+.rtg-wheel { width: 100%; display: block; }
+.rtg-wheel path { stroke: #fff; stroke-width: 1.5; }
+.rtg-rim { fill: var(--rtg-edge); }
+.rtg-peg { fill: var(--rtg-title); }
+.rtg-hub { fill: var(--rtg-title); stroke: var(--rtg-edge); stroke-width: 2.5; }
+.rtg-w-label { fill: #fff; font-family: var(--rtg-display); font-weight: 700; text-anchor: middle; paint-order: stroke; stroke: rgb(0 0 0 / .35); stroke-width: 2px; }
+
+.fx-canvas { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 70; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition: none !important; }
+}

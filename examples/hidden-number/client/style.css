@@ -1,0 +1,9 @@
+.hn { max-width: 560px; margin: 0 auto; padding: 24px 20px 60px; display: grid; gap: 16px; }
+.hn-bar { display: flex; justify-content: space-between; align-items: center; color: #fff; }
+.hn-timer { font: 700 1.3rem/1 var(--rtg-font); font-variant-numeric: tabular-nums; }
+.hn-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; }
+.hn-grid .rtg-btn { padding: .8em 0; font-size: 1.2rem; }
+.hn-grid .rtg-btn.chosen { background: var(--rtg-title); }
+.hn-scores li { display: flex; gap: .5em; align-items: center; }
+.hn-scores ol { padding: 0; margin: 0; list-style: none; display: grid; gap: 6px; }
+.hn-scores b { margin-left: auto; }
