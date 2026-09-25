@@ -8,6 +8,8 @@ Everything a remote-team multiplayer party game needs **except the game**.
 - Build sync: pages know which build they're on, reload after a deploy, and show a ✓/⚠ badge
 - Client kit: connection + server clock, home/lobby screens, prize wheels, animation/confetti kit, toasts
 
+New session starting a game? Read **[HANDOFF.md](HANDOFF.md)** first.
+
 Start with **[GAME_API.md](GAME_API.md)**, then copy
 [`examples/hidden-number`](examples/hidden-number).
 
