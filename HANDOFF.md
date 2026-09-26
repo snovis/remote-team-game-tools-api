@@ -12,8 +12,9 @@ package.
 
 | Thing | Where |
 |---|---|
-| Engine package (this repo) | `snovis/remote-team-game-tools-api`, tag `v0.1.0` |
+| Engine package (this repo) | `snovis/remote-team-game-tools-api`, tag `v0.2.0` |
 | Reference game | `snovis/empathy-poker` — "Good Day / Bad Day", tag `v0.1.2` |
+| Game on this package | `snovis/kartastrophe` — sticker karts; adds a 60 Hz fast lane (`/rt`) beside `/ws`, and its side panel is the reference for showing the host role in a game screen |
 | Live game | https://empathy-poker-production.up.railway.app (`release` branch) |
 | Dev game | https://empathy-poker-dev-production.up.railway.app (`dev` branch) |
 | Hosting | Railway workspace "Rymare Projects", project `empathy-poker` (services `empathy-poker` → `release`, `empathy-poker-dev` → `dev`) |
@@ -45,6 +46,11 @@ progressive reveal, and a Node player bot for testing (§6).
   the server stamps it and says its build on connect. Stale pages reload
   once; a badge shows `✓ <hash>` or red "old version". **Always tell Scott
   the short hash you deployed** so he can check the badge.
+- **The host role has a title and a grace period.** Players see "Game
+  Master" (a game renames it with `hostTitle`). A host whose connection
+  blips keeps the role for 20 s; after that, or on an explicit Leave, it
+  moves to the next connected player. The room's creator can always
+  Take back; the host can hand it on. GAME_API.md §2 has the rules.
 
 ## 3. Setting up a new game (do these in order)
 
@@ -55,7 +61,7 @@ progressive reveal, and a Node player bot for testing (§6).
 2. **Scaffold from the example:**
    - `package.json`: `"type": "module"`, `"start": "node server.js"`,
      `"test": "node --test test/"`, dependency
-     `"remote-team-game-tools-api": "github:snovis/remote-team-game-tools-api#v0.1.0"`.
+     `"remote-team-game-tools-api": "github:snovis/remote-team-game-tools-api#v0.2.0"`.
      This repo is **public**, so Railway's `npm install` fetches it with
      no token. Pin a tag; bump it deliberately when the engine changes.
    - `server.js`, `game.js`, `client/index.html` (with the build meta),
@@ -128,10 +134,18 @@ progressive reveal, and a Node player bot for testing (§6).
   and reveal progressively with running tallies rather than one mass flip.
 - **Flexible rules where real people differ** (e.g. reveal in any order).
 - **Visible version badge** so he can trust what he's looking at.
+- **Always show who's in charge.** Label the host by its title for
+  everyone, in the lobby *and* the game screen, with a "reconnecting…"
+  state; give the room's creator a Take back button and the host a way to
+  hand it on. (Kartastrophe once handed host away on a 2-second blip and
+  greyed out Scott's controls with nothing on screen saying why.)
 
 ## 6. How to verify before saying "done"
 
 - `npm test` for rules (hidden info, timers, scoring, rotation).
+- **Host blips:** in Playwright, wrap `window.WebSocket` in an init
+  script so the test can close the host's `/ws`; the role must stay put
+  through a short drop and move on after 20 s.
 - Multi-browser Playwright run: create/join/start/play a full round with
   2–3 contexts (one at 390×844 with `isMobile`/`hasTouch`), screenshot key
   moments, and **look at the screenshots**.

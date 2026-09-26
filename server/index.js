@@ -6,9 +6,9 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { WebSocketServer } from 'ws';
-import { RoomManager, BUILD, PALETTE } from './rooms.js';
+import { RoomManager, BUILD, PALETTE, HOST_GRACE_MS, DEFAULT_HOST_TITLE } from './rooms.js';
 
-export { RoomManager, BUILD, PALETTE };
+export { RoomManager, BUILD, PALETTE, HOST_GRACE_MS, DEFAULT_HOST_TITLE };
 
 const KIT_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../client');
 

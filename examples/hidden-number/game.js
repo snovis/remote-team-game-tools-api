@@ -70,7 +70,7 @@ export function handle(state, pid, a, ctx) {
       return;
     }
     case 'next':
-      if (!ctx.isHost) return 'Only the host starts the next round.';
+      if (!ctx.isHost) return `Only the ${ctx.hostTitle} starts the next round.`;
       if (r.phase !== 'results') return 'Finish this round first.';
       nextRound(state, ctx);
       return;

@@ -54,9 +54,15 @@ h1, h2 { font-family: var(--rtg-display); line-height: 1.1; margin: 0 0 .5em; te
 .rtg-lobby-head .rtg-muted { color: #fff; opacity: .7; margin: 0; }
 .rtg-big-code { font-family: var(--rtg-display); font-size: 3.4rem; font-weight: 800; letter-spacing: .18em; color: var(--rtg-title); margin: .05em 0 .2em .18em; }
 .rtg-players { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px 12px; }
-.rtg-players li { display: flex; align-items: center; gap: .5em; font-weight: 600; min-width: 0; }
+.rtg-players li { display: flex; flex-wrap: wrap; align-items: center; gap: .2em .5em; font-weight: 600; min-width: 0; }
 .rtg-players li.away { opacity: .4; }
 .rtg-players em { font-style: normal; font-size: .72rem; color: var(--rtg-muted); border: 1.5px solid var(--rtg-line); border-radius: 99px; padding: 0 .5em; }
+/* Who's host, for everyone: a filled tag in the title color. */
+.rtg-players em.rtg-host-tag { color: var(--rtg-ink); background: var(--rtg-title); border-color: var(--rtg-edge); font-weight: 700; white-space: nowrap; }
+.rtg-note { font: 600 .75rem var(--rtg-font); letter-spacing: 0; color: var(--rtg-muted); white-space: nowrap; }
+.rtg-role { margin-top: 14px; padding-top: 12px; border-top: 1.5px solid var(--rtg-line); }
+.rtg-take { display: flex; align-items: center; gap: 10px; justify-content: space-between; font-size: .85rem; }
+.rtg-take .rtg-btn { flex: none; }
 .rtg-swatch { display: inline-block; width: .9em; height: .9em; border-radius: 50%; background: var(--c); flex: none; }
 .rtg-settings { display: grid; gap: 10px; margin-bottom: 14px; }
 .rtg-leave { justify-self: center; color: #fff; border-color: rgb(255 255 255 / .4); }

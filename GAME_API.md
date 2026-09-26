@@ -1,9 +1,10 @@
 # Building a game on remote-team-game-tools-api
 
 This package is everything a remote-team party game needs **except the
-game**: Jackbox-style rooms, joining and rejoining, host handoff, player
-colors, a server clock, per-player hidden information, build sync after
-deploys, the home/lobby screens, prize wheels, and an animation kit.
+game**: Jackbox-style rooms, joining and rejoining, a host role that
+survives network blips and can be handed on, player colors, a server
+clock, per-player hidden information, build sync after deploys, the
+home/lobby screens, prize wheels, and an animation kit.
 
 You write two things: a **game module** (server rules) and a **game
 screen** (client UI). The smallest complete example is
@@ -34,6 +35,7 @@ live here. Clients only render what `view()` gives them.
 
 ```js
 export const title = 'My Game';          // shown in the lobby
+export const hostTitle = 'Game Master';  // optional: what players call the host (below)
 export const minPlayers = 2;             // host can't start with fewer
 export const maxPlayers = 30;            // joins refused beyond this
 export const defaultSettings = { rounds: 'rotation' };
@@ -59,8 +61,9 @@ export function tick(state, ctx) { return false; }
 export function view(state, playerId, ctx) { return {}; }
 ```
 
-`ctx` is `{ now, hostId, players: [{ id, name, color, connected }], isConnected(id) }`;
-in `handle` it also has `isHost` (the acting player is the host).
+`ctx` is `{ now, hostId, hostTitle, players: [{ id, name, color, connected }], isConnected(id) }`;
+in `handle` it also has `isHost` (the acting player is the host). Use
+`ctx.hostTitle` in messages players see (`Only the ${ctx.hostTitle} can…`).
 
 **Rules of thumb**
 
@@ -73,6 +76,35 @@ in `handle` it also has `isHost` (the acting player is the host).
   waiting on someone, and let the host act for or skip a missing player.
 - The room locks once the game starts; disconnected players rejoin
   their seat with their saved token.
+
+### The host role
+
+One player at a time is the host: they change settings, start the game,
+go back to the lobby, and do whatever your `handle()` gates on
+`ctx.isHost`. Players never see the word "host": the role has a title,
+**Game Master** by default, and `export const hostTitle = '…'` renames it
+(Kartastrophe's is "Race Master"). The room layer handles who holds it:
+
+- **Owner.** Whoever creates the room is its owner (`room.ownerId`) and
+  its first host.
+- **Grace period.** If the host's connection drops, they stay host for
+  `HOST_GRACE_MS` (20 s). Meanwhile `room.hostAway` is true and nobody
+  else gets the controls; if they're back in time, nothing changes.
+- **Moving on.** After the grace period the role goes to the first
+  connected player in join order. Leaving on purpose (Leave button) hands
+  it on at once. If nobody is connected, whoever comes back first takes it.
+- **Hand-off.** The host can give the role to another connected player:
+  `conn.handHost(playerId)`.
+- **Take back.** The owner can take the role back any time they're
+  connected: `conn.takeHost()`. It's a button, never automatic.
+
+The lobby shows all of this. **Your game screen must too:** label the
+host by `room.hostTitle` for everyone (with a "reconnecting…" state from
+`room.hostAway`), show the owner a Take back button when they aren't host,
+and give the host a way to hand the role on. The kit's `bindShell` wires
+`data-rtg="takeHost"`, `data-rtg="handHost" data-player="<id>"`, and
+`<select data-rtg-hand>` (options are player IDs) anywhere in the page,
+confirming a hand-off before sending it.
 
 ## 3. Client: the kit at `/rtg/`
 
@@ -100,9 +132,9 @@ function render() {
 
 | Piece | What it does |
 |---|---|
-| `connect({ gameId, onSync, onError, onStatus, onLeft })` | One WebSocket; reconnects with backoff; rejoins your seat after a reconnect or a reload onto `?room=CODE`; `conn.now()` is server time; `conn.act(action)` sends to your `handle()`. |
+| `connect({ gameId, onSync, onError, onStatus, onLeft })` | One WebSocket; reconnects with backoff; rejoins your seat after a reconnect or a reload onto `?room=CODE`; `conn.now()` is server time; `conn.act(action)` sends to your `handle()`; `conn.handHost(id)` / `conn.takeHost()` move the host role. |
 | Build sync | The server says its build on connect. If the page is older it reloads once; a badge bottom-right shows `✓ <hash>` or a red "old version · tap to reload". |
-| `renderHome` / `renderLobby` / `bindShell` | Name + room code + create/join/rejoin; lobby with players, invite link, host-only settings (`schema`: `[{ key, label, options: [{ value, label }] }]` or a function of the room), Start. |
+| `renderHome` / `renderLobby` / `bindShell` | Name + room code + create/join/rejoin; lobby with players (host labeled by title), invite link, hand-off / Take back, host-only settings (`schema`: `[{ key, label, options: [{ value, label }] }]` or a function of the room), Start. |
 | `renderWheel(segments, spin, spinMs, t)` + `startWheels(root, conn.now, { onLand })` | Server-clock prize wheel with a ticking pointer. |
 | `fx` | `fx.play(selector, keyframes, opts)` (re-render-safe Web Animations), `fx.fly(fromRect, toRect)`, `fx.burstAt(el)`, `fx.confetti()`, `fx.countUp(selector, from, to)`. |
 | `esc`, `clock(ms)`, `toast(text)`, `store` | HTML escaping, `m:ss`, a toast, safe localStorage. |
@@ -110,8 +142,13 @@ function render() {
 `sync` looks like:
 
 ```js
-{ t: 'sync', serverNow, you, room: { code, gameId, game, hostId, settings, started, players }, game: view(...) | null }
+{ t: 'sync', serverNow, you,
+  room: { code, gameId, game, hostId, hostTitle, hostAway, hostAwayUntil, ownerId, settings, started, players },
+  game: view(...) | null }
 ```
+
+`hostAwayUntil` is the server time the host's grace period ends (`null`
+while they're connected); compare it with `conn.now()` for a countdown.
 
 Theme by overriding `--rtg-*` variables (see `client/rtg.css`) or any
 `.rtg-*` class.
@@ -133,7 +170,7 @@ One Railway service per game, following a branch:
 ## 5. Installing
 
 ```sh
-npm install github:snovis/remote-team-game-tools-api#v0.1.0
+npm install github:snovis/remote-team-game-tools-api#v0.2.0
 ```
 
 Pin a tag or commit so an engine change never surprises a live game.

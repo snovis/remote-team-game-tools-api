@@ -1,5 +1,6 @@
 // Game-agnostic room layer: Jackbox-style room codes, joining, rejoining,
-// host handoff, player colors, a server tick, and per-player sync snapshots.
+// the host role (grace period, hand-off, take-back), player colors, a server
+// tick, and per-player sync snapshots.
 // A game plugs in as a module (see GAME_API.md); this file knows nothing
 // about any particular game.
 import crypto from 'node:crypto';
@@ -9,6 +10,15 @@ const DEFAULT_MAX_PLAYERS = 30;
 const TICK_MS = 250;
 const EMPTY_ROOM_TTL_MS = 30 * 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
+
+// A host whose connection drops keeps the role this long before it moves
+// on, so a network blip doesn't hand the controls to someone else. The
+// client backs off 1, 2, 4, then 8 s, so it retries 1, 3, 7 and 15 s after
+// a drop: four tries fit inside the grace period.
+export const HOST_GRACE_MS = 20 * 1000;
+
+// What players call the host unless the game module names it (hostTitle).
+export const DEFAULT_HOST_TITLE = 'Game Master';
 
 // Which code this server is running. Railway sets RAILWAY_GIT_COMMIT_SHA;
 // elsewhere every start gets a fresh "local-…" ID so pages still notice
@@ -128,6 +138,7 @@ export class RoomManager {
         continue;
       }
       room.emptySince = null;
+      room.checkHost(now);
       if (room.state && room.game.tick?.(room.state, room.ctx())) room.broadcast();
     }
   }
@@ -140,6 +151,8 @@ export class Room {
     this.game = game;
     this.players = [];
     this.hostId = null;
+    this.ownerId = null; // who created the room: can take the host role back
+    this.hostAwaySince = null; // when the host's connection dropped
     this.settings = { ...(game.defaultSettings || {}) };
     this.state = null;
     this.emptySince = null;
@@ -156,6 +169,7 @@ export class Room {
     };
     this.players.push(player);
     if (!this.hostId) this.hostId = player.id;
+    if (!this.ownerId) this.ownerId = player.id;
     this.attach(player, ws);
   }
 
@@ -167,7 +181,8 @@ export class Room {
     player.ws = ws;
     ws.session = { room: this, playerId: player.id };
     send(ws, { t: 'joined', code: this.code, playerId: player.id, token: player.token });
-    if (!this.player(this.hostId)?.ws) this.hostId = player.id;
+    if (player.id === this.hostId) this.hostAwaySince = null; // back within the grace period
+    else if (this.hostOpen(Date.now())) this.setHost(player.id);
     this.broadcast();
   }
 
@@ -175,10 +190,9 @@ export class Room {
     const player = this.player(playerId);
     if (!player || player.ws !== ws) return;
     player.ws = null;
-    if (this.hostId === playerId) {
-      const next = this.players.find((p) => p.ws);
-      if (next) this.hostId = next.id;
-    }
+    // The host keeps the role through a short drop; checkHost() hands it on
+    // if they aren't back within the grace period.
+    if (this.hostId === playerId) this.hostAwaySince = Date.now();
     this.broadcast();
   }
 
@@ -186,10 +200,39 @@ export class Room {
     return this.players.find((p) => p.id === id);
   }
 
+  get hostTitle() {
+    return String(this.game.hostTitle || DEFAULT_HOST_TITLE);
+  }
+
+  setHost(id) {
+    this.hostId = id;
+    this.hostAwaySince = null;
+  }
+
+  // Nobody holds the host role: there's no host, or the host dropped and
+  // hasn't come back within the grace period.
+  hostOpen(now) {
+    const host = this.player(this.hostId);
+    if (host?.ws) return false;
+    return !host || this.hostAwaySince === null || now - this.hostAwaySince >= HOST_GRACE_MS;
+  }
+
+  // Runs on the manager's tick: once the grace period is up, the role goes
+  // to the first connected player in join order. With nobody connected it
+  // waits, and whoever attaches next takes it.
+  checkHost(now) {
+    if (this.hostAwaySince === null || !this.hostOpen(now)) return;
+    const next = this.players.find((p) => p.ws);
+    if (!next) return;
+    this.setHost(next.id);
+    this.broadcast();
+  }
+
   ctx() {
     return {
       now: Date.now(),
       hostId: this.hostId,
+      hostTitle: this.hostTitle,
       players: this.players.map(({ id, name, color, ws }) => ({ id, name, color, connected: !!ws })),
       isConnected: (id) => !!this.player(id)?.ws,
     };
@@ -201,23 +244,41 @@ export class Room {
 
   onMessage(playerId, msg, fail) {
     const isHost = playerId === this.hostId;
+    const title = this.hostTitle;
     switch (msg.t) {
       case 'leave': {
         const player = this.player(playerId);
         if (player?.ws) player.ws.session = null;
         if (!this.state) this.players = this.players.filter((p) => p.id !== playerId);
         else if (player) player.ws = null;
-        if (this.hostId === playerId) this.hostId = this.players.find((p) => p.ws)?.id ?? null;
+        // Leaving on purpose hands the role on right away: no grace period.
+        if (this.hostId === playerId) this.setHost(this.players.find((p) => p.ws)?.id ?? null);
         this.broadcast();
         return;
       }
+      case 'handHost': {
+        if (!isHost) return fail(`Only the ${title} can hand the role to someone else.`);
+        const to = this.player(msg.to);
+        if (!to || to.id === playerId) return fail('Pick another player.');
+        if (!to.ws) return fail(`${to.name} isn't connected right now.`);
+        this.setHost(to.id);
+        this.broadcast();
+        return;
+      }
+      case 'takeHost':
+        // The room's creator can pull the role back whenever they're here.
+        if (playerId !== this.ownerId) return fail(`Only the player who made the room can take back the ${title} role.`);
+        if (isHost) return;
+        this.setHost(playerId);
+        this.broadcast();
+        return;
       case 'settings':
-        if (!isHost || this.state) return fail('Only the host can change settings before the game starts.');
+        if (!isHost || this.state) return fail(`Only the ${title} can change settings before the game starts.`);
         this.settings = this.normalize({ ...this.settings, ...msg.settings });
         this.broadcast();
         return;
       case 'start': {
-        if (!isHost || this.state) return fail('Only the host can start the game.');
+        if (!isHost || this.state) return fail(`Only the ${title} can start the game.`);
         // Anyone who left the lobby before start is dropped.
         this.players = this.players.filter((p) => p.ws);
         const min = this.game.minPlayers ?? 2;
@@ -227,7 +288,7 @@ export class Room {
         return;
       }
       case 'lobby':
-        if (!isHost || !this.state?.over) return fail('Only the host can return to the lobby after the game.');
+        if (!isHost || !this.state?.over) return fail(`Only the ${title} can return to the lobby after the game.`);
         this.state = null;
         this.broadcast();
         return;
@@ -255,6 +316,12 @@ export class Room {
         gameId: this.gameId,
         game: this.game.title,
         hostId: this.hostId,
+        hostTitle: ctx.hostTitle,
+        // The host dropped and is inside the grace period (or nobody's here
+        // to take over). hostAwayUntil is the server time the role moves on.
+        hostAway: this.hostAwaySince !== null,
+        hostAwayUntil: this.hostAwaySince === null ? null : this.hostAwaySince + HOST_GRACE_MS,
+        ownerId: this.ownerId,
         settings: this.settings,
         started: !!this.state,
         players: ctx.players,

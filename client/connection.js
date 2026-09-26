@@ -43,6 +43,10 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
       if (s) send({ t: 'rejoin', code: s.code, token: s.token });
     },
     setSettings: (settings) => send({ t: 'settings', settings }),
+    /** Host only: give the host role to another connected player. */
+    handHost: (playerId) => send({ t: 'handHost', to: playerId }),
+    /** Room creator only: take the host role back. */
+    takeHost: () => send({ t: 'takeHost' }),
     start: () => send({ t: 'start' }),
     toLobby: () => send({ t: 'lobby' }),
     leave({ forget = true } = {}) {
