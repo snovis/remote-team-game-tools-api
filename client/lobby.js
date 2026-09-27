@@ -89,7 +89,8 @@ export function renderLobby(sync, { schema = [], minPlayers = 2, title = '' } = 
       ${fields.length ? `<h2>Game settings${host ? '' : ` <span class="rtg-note">${esc(gm)} picks</span>`}</h2><div class="rtg-settings">${settings}</div>` : ''}
       ${host
         ? `<button class="rtg-btn primary wide" data-rtg="start" ${ready ? '' : 'disabled'}>Start game</button>
-           <p class="rtg-muted rtg-center">${ready ? 'The room locks once the game starts.' : `Waiting for ${minPlayers} players…`}</p>`
+           <p class="rtg-muted rtg-center">${!ready ? `Waiting for ${minPlayers} players…`
+             : room.joinInProgress ? 'Latecomers can still join once the game starts.' : 'The room locks once the game starts.'}</p>`
         : `<p class="rtg-muted rtg-center">${esc(waiting)}</p>`}
     </section>` : ''}
     <button class="rtg-btn ghost small rtg-leave" data-rtg="leave">Leave room</button>

@@ -25,6 +25,9 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
   let offset = 0;
   let sync = null;
   let online = false;
+  // A Join for a room we already have a seat in tries the seat first, so
+  // coming back to a game that lets latecomers in doesn't make a second you.
+  let pendingJoin = null;
 
   const conn = {
     /** Room code from the page URL (?room=ABCD), if any. */
@@ -37,7 +40,13 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
     send,
     act: (action) => send({ t: 'action', action }),
     create: (name) => send({ t: 'create', game: gameId, name }),
-    join: (code, name) => send({ t: 'join', code, name }),
+    /** Join a room by code. Already have a seat there? You get it back. */
+    join(code, name) {
+      const s = store.get(SESSION_KEY);
+      if (s?.code !== String(code).trim().toUpperCase()) return send({ t: 'join', code, name });
+      pendingJoin = online ? { code, name } : null;
+      send({ t: 'rejoin', code: s.code, token: s.token });
+    },
     rejoin() {
       const s = store.get(SESSION_KEY);
       if (s) send({ t: 'rejoin', code: s.code, token: s.token });
@@ -76,6 +85,7 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
     ws.onmessage = (e) => handle(JSON.parse(e.data));
     ws.onclose = () => {
       online = false;
+      pendingJoin = null;
       onStatus(false);
       setTimeout(open, Math.min(1000 * 2 ** retry++, 8000));
     };
@@ -97,11 +107,19 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
         }
         return;
       case 'joined':
+        pendingJoin = null;
         store.set(SESSION_KEY, { code: msg.code, token: msg.token });
         history.replaceState(null, '', `?room=${msg.code}`);
         return;
       case 'rejoinFailed':
         store.del(SESSION_KEY);
+        if (pendingJoin) {
+          // That seat's gone: join as someone new after all.
+          const { code, name } = pendingJoin;
+          pendingJoin = null;
+          send({ t: 'join', code, name });
+          return;
+        }
         if (sync) {
           sync = null;
           onError('That game has ended.');

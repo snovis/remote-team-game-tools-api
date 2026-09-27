@@ -1,6 +1,7 @@
-// Game-agnostic room layer: Jackbox-style room codes, joining, rejoining,
-// the host role (grace period, hand-off, take-back), player colors, a server
-// tick, and per-player sync snapshots.
+// Game-agnostic room layer: Jackbox-style room codes, joining (mid-game too,
+// for games that allow it), rejoining, the host role (grace period,
+// hand-off, take-back), player colors, a server tick, and per-player sync
+// snapshots.
 // A game plugs in as a module (see GAME_API.md); this file knows nothing
 // about any particular game.
 import crypto from 'node:crypto';
@@ -104,6 +105,10 @@ export class RoomManager {
         const room = new Room(this.newCode(), msg.game, game);
         this.rooms.set(room.code, room);
         room.addPlayer(ws, name);
+        // autoStart games skip the lobby: the room starts the moment it's
+        // made, so the creator's first sync is already the running game.
+        if (game.autoStart) room.startGame();
+        room.broadcast();
         return;
       }
       case 'join': {
@@ -111,9 +116,14 @@ export class RoomManager {
         if (!room) return fail('No room with that code.');
         const name = cleanName(msg.name);
         if (!name) return fail('Please enter your name.');
-        if (room.state) return fail('That game has already started. Rooms lock once the game begins.');
+        // Rooms lock once the game begins, unless the game lets latecomers in.
+        if (room.state && !room.game.joinInProgress) return fail('That game has already started. Rooms lock once the game begins.');
         if (room.players.length >= (room.game.maxPlayers ?? DEFAULT_MAX_PLAYERS)) return fail('That room is full.');
-        room.addPlayer(ws, name);
+        const player = room.addPlayer(ws, name);
+        // Joining a running game: the game gives the newcomer a place in it
+        // before anyone's next view is rendered.
+        if (room.state) room.game.join?.(room.state, { id: player.id, name: player.name, color: player.color }, room.ctx());
+        room.broadcast();
         return;
       }
       case 'rejoin': {
@@ -158,6 +168,8 @@ export class Room {
     this.emptySince = null;
   }
 
+  // Seats a new player and tells them they're in, but doesn't sync: the
+  // caller finishes first (autoStart, the game's join hook), then broadcasts.
   addPlayer(ws, name) {
     const used = new Set(this.players.map((p) => p.color));
     const player = {
@@ -170,10 +182,17 @@ export class Room {
     this.players.push(player);
     if (!this.hostId) this.hostId = player.id;
     if (!this.ownerId) this.ownerId = player.id;
-    this.attach(player, ws);
+    this.seat(player, ws);
+    return player;
   }
 
+  // A returning player (rejoin) takes their seat back, and everyone syncs.
   attach(player, ws) {
+    this.seat(player, ws);
+    this.broadcast();
+  }
+
+  seat(player, ws) {
     if (player.ws && player.ws !== ws) {
       player.ws.session = null;
       try { player.ws.close(); } catch { /* ignore */ }
@@ -183,7 +202,6 @@ export class Room {
     send(ws, { t: 'joined', code: this.code, playerId: player.id, token: player.token });
     if (player.id === this.hostId) this.hostAwaySince = null; // back within the grace period
     else if (this.hostOpen(Date.now())) this.setHost(player.id);
-    this.broadcast();
   }
 
   detach(playerId, ws) {
@@ -242,6 +260,11 @@ export class Room {
     return this.game.normalizeSettings ? this.game.normalizeSettings(settings) : settings;
   }
 
+  // The host pressed Start, or an autoStart room was just made.
+  startGame() {
+    this.state = this.game.create(this.normalize(this.settings), this.ctx());
+  }
+
   onMessage(playerId, msg, fail) {
     const isHost = playerId === this.hostId;
     const title = this.hostTitle;
@@ -283,7 +306,7 @@ export class Room {
         this.players = this.players.filter((p) => p.ws);
         const min = this.game.minPlayers ?? 2;
         if (this.players.length < min) return fail(`You need at least ${min} players.`);
-        this.state = this.game.create(this.normalize(this.settings), this.ctx());
+        this.startGame();
         this.broadcast();
         return;
       }
@@ -324,6 +347,8 @@ export class Room {
         ownerId: this.ownerId,
         settings: this.settings,
         started: !!this.state,
+        // Latecomers can join while the game runs (the game's joinInProgress).
+        joinInProgress: !!this.game.joinInProgress,
         players: ctx.players,
       },
     };

@@ -39,13 +39,21 @@ export const hostTitle = 'Game Master';  // optional: what players call the host
 export const minPlayers = 2;             // host can't start with fewer
 export const maxPlayers = 30;            // joins refused beyond this
 export const defaultSettings = { rounds: 'rotation' };
+export const autoStart = true;           // optional: start when the room is made, no lobby (below)
+export const joinInProgress = true;      // optional: people can join while it runs (below)
 
 // Clean up whatever the host picked (never trust the client).
 export function normalizeSettings(settings) { return settings; }
 
-// Host pressed Start. Return your state object. Set state.over = true
-// when the game ends (that unlocks the host's "Play again").
+// Host pressed Start (or, with autoStart, the room was just made).
+// Return your state object. Set state.over = true when the game ends
+// (that unlocks the host's "Play again").
 export function create(settings, ctx) { return { over: false }; }
+
+// Optional, with joinInProgress. `player` ({ id, name, color }) just
+// joined the running game: give them a place in it. ctx already lists
+// them. Everyone gets a sync right after.
+export function join(state, player, ctx) {}
 
 // A player sent conn.act(action). Mutate state. Return an error string
 // to reject (shown to that player as a toast), or nothing to accept.
@@ -74,8 +82,49 @@ in `handle` it also has `isHost` (the acting player is the host). Use
   `crypto.randomInt(n)`. A wheel spin is `{ index, spunAt: ctx.now }`.
 - Players can disconnect any time. Check `ctx.isConnected(id)` before
   waiting on someone, and let the host act for or skip a missing player.
-- The room locks once the game starts; disconnected players rejoin
-  their seat with their saved token.
+- The room locks once the game starts, unless the game exports
+  `joinInProgress` (below). Disconnected players rejoin their seat with
+  their saved token either way.
+
+### Starting straight away, and joining mid-game
+
+By default a room waits in the lobby until the host presses Start, then
+locks. Two optional exports change that, for games where "can I play?"
+should always be yes (Kartastrophe's lobby is a live warm-up arena):
+
+**`export const autoStart = true`** starts the game the moment the room
+is made. The creator is seated (`joined`), then the engine does what Start
+does, `state = create(normalizeSettings(settings), ctx)` with the creator
+as the only player, and sends one sync that already carries your view: the
+creator never sees the lobby. `minPlayers` doesn't hold it back (it still
+gates the Start button). It only applies at creation: after the host's
+"Play again" (`state.over`, then back to the lobby) the room waits in the
+lobby like any other, so a game that should never leave play keeps its
+own between-rounds screens and doesn't set `over`.
+
+**`export const joinInProgress = true`** accepts joins by room code while
+the game is running (other games' rooms keep the lock and its message).
+The room must still have space: `maxPlayers` counts every seat, including
+players who dropped or left mid-game and still hold theirs. In order:
+
+1. The newcomer is added to the room (next free color) and gets the usual
+   `joined` (code, playerId, token), so their page saves the session. Like
+   any join, they take the host role if nobody holds it.
+2. The engine calls your optional `join(state, player, ctx)`, with
+   `player = { id, name, color }` and the usual room `ctx`, whose `players`
+   already include the newcomer, connected. Mutate `state` to give them a
+   place. It can't refuse anyone (that's `maxPlayers`) and its return value
+   is ignored.
+3. Everyone gets one sync. The newcomer's first sync is the running game,
+   with the place `join()` gave them, so the client's `onSync` sees
+   `sync.game` straight away.
+
+Without a `join()` hook, latecomers are in the room (`ctx.players`,
+`view(state, theirId)`) but your state doesn't know them, so `view()` must
+cope. `join()` is only for newcomers to a running game: players who join
+in the lobby are in `create()`, and a rejoin (saved token, including after
+Leave mid-game, which keeps the seat) takes back a seat without calling it.
+Sync's `room.joinInProgress` says whether the game lets latecomers in.
 
 ### The host role
 
@@ -132,7 +181,7 @@ function render() {
 
 | Piece | What it does |
 |---|---|
-| `connect({ gameId, onSync, onError, onStatus, onLeft })` | One WebSocket; reconnects with backoff; rejoins your seat after a reconnect or a reload onto `?room=CODE`; `conn.now()` is server time; `conn.act(action)` sends to your `handle()`; `conn.handHost(id)` / `conn.takeHost()` move the host role. |
+| `connect({ gameId, onSync, onError, onStatus, onLeft })` | One WebSocket; reconnects with backoff; rejoins your seat after a reconnect or a reload onto `?room=CODE`; `conn.join(code, name)` takes back your seat if you already have one in that room (else joins as someone new); `conn.now()` is server time; `conn.act(action)` sends to your `handle()`; `conn.handHost(id)` / `conn.takeHost()` move the host role. |
 | Build sync | The server says its build on connect. If the page is older it reloads once; a badge bottom-right shows `✓ <hash>` or a red "old version · tap to reload". |
 | `renderHome` / `renderLobby` / `bindShell` | Name + room code + create/join/rejoin; lobby with players (host labeled by title), invite link, hand-off / Take back, host-only settings (`schema`: `[{ key, label, options: [{ value, label }] }]` or a function of the room), Start. |
 | `renderWheel(segments, spin, spinMs, t)` + `startWheels(root, conn.now, { onLand })` | Server-clock prize wheel with a ticking pointer. |
@@ -143,7 +192,7 @@ function render() {
 
 ```js
 { t: 'sync', serverNow, you,
-  room: { code, gameId, game, hostId, hostTitle, hostAway, hostAwayUntil, ownerId, settings, started, players },
+  room: { code, gameId, game, hostId, hostTitle, hostAway, hostAwayUntil, ownerId, settings, started, joinInProgress, players },
   game: view(...) | null }
 ```
 
@@ -170,7 +219,7 @@ One Railway service per game, following a branch:
 ## 5. Installing
 
 ```sh
-npm install github:snovis/remote-team-game-tools-api#v0.2.0
+npm install github:snovis/remote-team-game-tools-api#v0.3.0
 ```
 
 Pin a tag or commit so an engine change never surprises a live game.

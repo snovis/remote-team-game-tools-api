@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { RoomManager, BUILD, HOST_GRACE_MS } from '../server/rooms.js';
+import { RoomManager, BUILD, HOST_GRACE_MS, PALETTE } from '../server/rooms.js';
 
 // A stand-in WebSocket: records what the server sends, lets tests send.
 class FakeSocket extends EventEmitter {
@@ -296,5 +296,178 @@ test('the host title defaults to Game Master and a game can rename it', () => {
   r.say({ t: 'start' });
   s.say({ t: 'action', action: {} });
   assert.equal(s.last('error').message, 'Ask the Race Master.', 'games get it in ctx too');
+  rooms.stop();
+});
+
+// ---- autoStart and joinInProgress: a game that's running from the moment
+// the room is made, and that latecomers can join
+
+// A drop-in arena: everyone gets a seat, in join order. It records every
+// create() and join() call so tests can check what the game was given.
+function arena(extra = {}) {
+  const calls = { create: [], join: [] };
+  const game = {
+    title: 'Arena',
+    minPlayers: 2, // autoStart doesn't wait for this; the Start button does
+    maxPlayers: 3,
+    autoStart: true,
+    joinInProgress: true,
+    defaultSettings: { speed: 'slow' },
+    normalizeSettings: (s) => ({ speed: s.speed === 'fast' ? 'fast' : 'slow' }),
+    create(settings, ctx) {
+      calls.create.push({ settings, players: ctx.players });
+      return { seats: ctx.players.map((p) => p.id), over: false };
+    },
+    join(state, player, ctx) {
+      calls.join.push({ player, players: ctx.players, connected: ctx.isConnected(player.id), hostId: ctx.hostId });
+      state.seats.push(player.id);
+    },
+    handle(state, pid, a) {
+      if (a.type === 'end') { state.over = true; return; }
+      return 'Unknown action.';
+    },
+    view: (state, pid) => ({ seats: state.seats, mine: state.seats.indexOf(pid), over: state.over }),
+    ...extra,
+  };
+  return { game, calls };
+}
+
+const syncs = (ws) => ws.sent.filter((m) => m.t === 'sync');
+const indexOf = (ws, t) => ws.sent.findIndex((m) => m.t === t);
+
+test('autoStart: making the room starts the game, so the creator never sees the lobby', () => {
+  const { game, calls } = arena();
+  const { rooms, join } = setup({ arena: game });
+  const a = join(); a.say({ t: 'create', game: 'arena', name: 'Ann' });
+  const { playerId: ann } = a.last('joined');
+  assert.equal(syncs(a).length, 1, 'one sync, and it is already the game');
+  assert.ok(indexOf(a, 'joined') < indexOf(a, 'sync'), 'joined comes first, as always');
+  const sync = a.last('sync');
+  assert.equal(sync.room.started, true);
+  assert.equal(sync.room.hostId, ann);
+  assert.equal(sync.room.ownerId, ann);
+  assert.deepEqual(sync.game, { seats: [ann], mine: 0, over: false });
+  // Built exactly like Start builds it: normalized settings, the room's players.
+  assert.equal(calls.create.length, 1);
+  assert.deepEqual(calls.create[0].settings, { speed: 'slow' });
+  assert.deepEqual(calls.create[0].players.map((p) => [p.name, p.connected]), [['Ann', true]]);
+  assert.equal(calls.join.length, 0, 'the creator is in create(), not join()');
+  rooms.stop();
+});
+
+test('joinInProgress: a latecomer gets joined, a place from join(), then one sync', () => {
+  const { game, calls } = arena();
+  const { rooms, join } = setup({ arena: game });
+  const a = join(); a.say({ t: 'create', game: 'arena', name: 'Ann' });
+  const { code, playerId: ann } = a.last('joined');
+  const annSyncs = syncs(a).length;
+  const b = join(); b.say({ t: 'join', code: code.toLowerCase(), name: '  Bo ' });
+  assert.equal(b.last('error'), undefined);
+  const joined = b.last('joined');
+  assert.equal(joined.code, code);
+  assert.ok(joined.token);
+  const bo = joined.playerId;
+  // join() ran once, with the newcomer (id, name, color: never the token)
+  // and a ctx that already has them, connected.
+  assert.equal(calls.join.length, 1);
+  assert.deepEqual(calls.join[0].player, { id: bo, name: 'Bo', color: PALETTE[1] });
+  assert.deepEqual(calls.join[0].players.map((p) => [p.name, p.connected]), [['Ann', true], ['Bo', true]]);
+  assert.equal(calls.join[0].connected, true);
+  assert.equal(calls.join[0].hostId, ann);
+  // Bo's first sync is the game with his place already in it.
+  assert.equal(syncs(b).length, 1);
+  assert.ok(indexOf(b, 'joined') < indexOf(b, 'sync'));
+  const sync = b.last('sync');
+  assert.equal(sync.you, bo);
+  assert.equal(sync.room.started, true);
+  assert.equal(sync.room.joinInProgress, true);
+  assert.deepEqual(sync.game, { seats: [ann, bo], mine: 1, over: false });
+  // Everyone else hears about it in that same one sync.
+  assert.equal(syncs(a).length, annSyncs + 1);
+  assert.deepEqual(a.last('sync').game.seats, [ann, bo]);
+  assert.equal(a.last('sync').room.players.length, 2);
+  assert.equal(a.last('sync').room.hostId, ann, 'joining never moves the host role');
+  rooms.stop();
+});
+
+test('joinInProgress without a join() hook still lets latecomers in', () => {
+  const { game } = arena({ join: undefined });
+  const { rooms, join } = setup({ arena: game });
+  const a = join(); a.say({ t: 'create', game: 'arena', name: 'Ann' });
+  const b = join(); b.say({ t: 'join', code: a.last('joined').code, name: 'Bo' });
+  assert.ok(b.last('joined'));
+  assert.equal(b.last('sync').game.mine, -1, 'no place in the game, but in the room');
+  assert.equal(a.last('sync').room.players.length, 2);
+  rooms.stop();
+});
+
+test('games without joinInProgress still lock at start, join() hook or not', () => {
+  const calls = [];
+  const { rooms, join } = setup({ secrets: { ...secretGame, join: () => calls.push('join') } });
+  const a = join(); a.say({ t: 'create', game: 'secrets', name: 'Ann' });
+  const code = a.last('joined').code;
+  assert.equal(a.last('sync').game, null, 'no autoStart: the lobby, as before');
+  assert.equal(a.last('sync').room.joinInProgress, false);
+  join().say({ t: 'join', code, name: 'Bo' });
+  a.say({ t: 'start' });
+  const c = join(); c.say({ t: 'join', code, name: 'Cy' });
+  assert.equal(c.last('error').message, 'That game has already started. Rooms lock once the game begins.');
+  assert.equal(c.last('joined'), undefined);
+  assert.equal(a.last('sync').room.players.length, 2);
+  assert.deepEqual(calls, []);
+  rooms.stop();
+});
+
+test('a running joinInProgress game still refuses joins once it is full', () => {
+  const { game, calls } = arena(); // maxPlayers: 3
+  const { rooms, join } = setup({ arena: game });
+  const a = join(); a.say({ t: 'create', game: 'arena', name: 'Ann' });
+  const code = a.last('joined').code;
+  for (const n of ['Bo', 'Cy']) join().say({ t: 'join', code, name: n });
+  const d = join(); d.say({ t: 'join', code, name: 'Di' });
+  assert.equal(d.last('error').message, 'That room is full.');
+  assert.equal(d.last('joined'), undefined);
+  assert.equal(calls.join.length, 2, 'join() only for the ones who got in');
+  assert.equal(a.last('sync').game.seats.length, 3);
+  rooms.stop();
+});
+
+test('rejoining a running joinInProgress game takes your seat back without another join()', () => {
+  const { game, calls } = arena();
+  const { rooms, join } = setup({ arena: game });
+  const a = join(); a.say({ t: 'create', game: 'arena', name: 'Ann' });
+  const code = a.last('joined').code;
+  const b = join(); b.say({ t: 'join', code, name: 'Bo' });
+  const { playerId: bo, token } = b.last('joined');
+  b.close();
+  assert.equal(a.last('sync').room.players.find((p) => p.id === bo).connected, false);
+  const b2 = join(); b2.say({ t: 'rejoin', code, token });
+  assert.equal(b2.last('joined').playerId, bo);
+  assert.equal(b2.last('sync').game.mine, 1, 'same seat');
+  // Leaving mid-game keeps the seat too, so the saved token still works.
+  b2.say({ t: 'leave' });
+  const b3 = join(); b3.say({ t: 'rejoin', code, token });
+  assert.equal(b3.last('joined').playerId, bo);
+  assert.equal(calls.join.length, 1, 'join() is for newcomers only');
+  assert.equal(a.last('sync').room.players.length, 2);
+  rooms.stop();
+});
+
+test('after Play again an autoStart room waits in the lobby like any other', () => {
+  const { game, calls } = arena();
+  const { rooms, join } = setup({ arena: game });
+  const a = join(); a.say({ t: 'create', game: 'arena', name: 'Ann' });
+  const code = a.last('joined').code;
+  a.say({ t: 'action', action: { type: 'end' } });
+  a.say({ t: 'lobby' });
+  assert.equal(a.last('sync').game, null);
+  // Joining the lobby is ordinary joining: no join() call.
+  const b = join(); b.say({ t: 'join', code, name: 'Bo' });
+  assert.equal(b.last('sync').game, null);
+  assert.equal(calls.join.length, 0);
+  // And Start works as it always has.
+  a.say({ t: 'start' });
+  assert.equal(b.last('sync').game.seats.length, 2);
+  assert.equal(calls.create.length, 2);
   rooms.stop();
 });

@@ -12,9 +12,9 @@ package.
 
 | Thing | Where |
 |---|---|
-| Engine package (this repo) | `snovis/remote-team-game-tools-api`, tag `v0.2.0` |
+| Engine package (this repo) | `snovis/remote-team-game-tools-api`, tag `v0.3.0` |
 | Reference game | `snovis/empathy-poker` — "Good Day / Bad Day", tag `v0.1.2` |
-| Game on this package | `snovis/kartastrophe` — sticker karts; adds a 60 Hz fast lane (`/rt`) beside `/ws`, and its side panel is the reference for showing the host role in a game screen |
+| Game on this package | `snovis/kartastrophe` — sticker karts; adds a 60 Hz fast lane (`/rt`) beside `/ws`, and its side panel is the reference for showing the host role in a game screen; the first game on `autoStart` + `joinInProgress` (its lobby is a live arena anyone can drive into) |
 | Live game | https://empathy-poker-production.up.railway.app (`release` branch) |
 | Dev game | https://empathy-poker-dev-production.up.railway.app (`dev` branch) |
 | Hosting | Railway workspace "Rymare Projects", project `empathy-poker` (services `empathy-poker` → `release`, `empathy-poker-dev` → `dev`) |
@@ -51,6 +51,10 @@ progressive reveal, and a Node player bot for testing (§6).
   blips keeps the role for 20 s; after that, or on an explicit Leave, it
   moves to the next connected player. The room's creator can always
   Take back; the host can hand it on. GAME_API.md §2 has the rules.
+- **Rooms lock at start, unless the game says otherwise.** A game module
+  can export `autoStart` (making a room starts the game, no lobby) and
+  `joinInProgress` (people can join a running game by code; the game's
+  `join(state, player, ctx)` gives them a place). GAME_API.md §2.
 
 ## 3. Setting up a new game (do these in order)
 
@@ -61,7 +65,7 @@ progressive reveal, and a Node player bot for testing (§6).
 2. **Scaffold from the example:**
    - `package.json`: `"type": "module"`, `"start": "node server.js"`,
      `"test": "node --test test/"`, dependency
-     `"remote-team-game-tools-api": "github:snovis/remote-team-game-tools-api#v0.2.0"`.
+     `"remote-team-game-tools-api": "github:snovis/remote-team-game-tools-api#v0.3.0"`.
      This repo is **public**, so Railway's `npm install` fetches it with
      no token. Pin a tag; bump it deliberately when the engine changes.
    - `server.js`, `game.js`, `client/index.html` (with the build meta),
