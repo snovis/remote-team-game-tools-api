@@ -74,6 +74,12 @@ h1, h2 { font-family: var(--rtg-display); line-height: 1.1; margin: 0 0 .5em; te
 }
 #rtg-toast.show { opacity: 1; transform: translate(-50%, 0); }
 
+/* ask(): a yes/no card over the page, instead of the browser's confirm box. */
+#rtg-ask { position: fixed; inset: 0; z-index: 90; display: grid; place-items: center; padding: 16px; background: rgb(0 0 0 / .45); }
+.rtg-ask-card { width: min(380px, 100%); box-sizing: border-box; }
+.rtg-ask-card p { margin: 0 0 16px; }
+.rtg-ask-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
 /* Build badge: which code is this page running, and does it match the server? */
 #rtg-build {
   position: fixed; right: 16px; bottom: 14px; z-index: 35; cursor: default;

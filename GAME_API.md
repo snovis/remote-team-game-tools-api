@@ -153,7 +153,7 @@ host by `room.hostTitle` for everyone (with a "reconnecting…" state from
 and give the host a way to hand the role on. The kit's `bindShell` wires
 `data-rtg="takeHost"`, `data-rtg="handHost" data-player="<id>"`, and
 `<select data-rtg-hand>` (options are player IDs) anywhere in the page,
-confirming a hand-off before sending it.
+asking before a hand-off goes through (with `ask`, below).
 
 ## 3. Client: the kit at `/rtg/`
 
@@ -165,7 +165,7 @@ confirming a hand-off before sending it.
 
 ```js
 import { connect, renderHome, renderLobby, bindShell, renderWheel, startWheels,
-         esc, clock, toast, store, fx } from '/rtg/rtg.js';
+         esc, clock, toast, ask, setAsk, store, fx } from '/rtg/rtg.js';
 
 const app = document.getElementById('app');
 const conn = connect({ gameId: 'my-game', onSync: render, onError: toast, onLeft: render });
@@ -187,6 +187,7 @@ function render() {
 | `renderWheel(segments, spin, spinMs, t)` + `startWheels(root, conn.now, { onLand })` | Server-clock prize wheel with a ticking pointer. |
 | `fx` | `fx.play(selector, keyframes, opts)` (re-render-safe Web Animations), `fx.fly(fromRect, toRect)`, `fx.burstAt(el)`, `fx.confetti()`, `fx.countUp(selector, from, to)`. |
 | `esc`, `clock(ms)`, `toast(text)`, `store` | HTML escaping, `m:ss`, a toast, safe localStorage. |
+| `ask({ title, text, yes, no })` / `setAsk(fn)` | A yes/no card over the page (never the browser's `confirm()`, which looks like something broke); resolves `true`/`false`. The kit asks with it before Leave and a hand-off. `setAsk(fn)` swaps in your game's own card for all of them: `fn` takes the same options and returns a promise of `true`/`false`. |
 
 `sync` looks like:
 

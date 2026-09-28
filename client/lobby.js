@@ -3,7 +3,7 @@
 // every game shares. Games describe their settings with a small schema;
 // this renders and wires it. Players see the host role by its title
 // (room.hostTitle, "Game Master" unless the game names it).
-import { esc, store, toast } from './util.js';
+import { esc, store, toast, ask } from './util.js';
 
 const NAME_KEY = 'rtg.name';
 
@@ -128,11 +128,7 @@ export function bindShell(root, conn) {
       case 'lobby': return conn.toLobby();
       case 'takeHost': return conn.takeHost();
       case 'handHost': return handOver(conn, el.dataset.player); // a button with data-player="<id>"
-      case 'leave': {
-        const g = conn.sync?.game;
-        if (g && !g.over && !confirm('Leave the game? You can rejoin from the home screen.')) return;
-        return conn.leave({ forget: !g || !!g.over });
-      }
+      case 'leave': return leave(conn);
     }
   });
   root.addEventListener('change', (e) => {
@@ -155,10 +151,20 @@ export function bindShell(root, conn) {
   });
 }
 
+// Leaving a game in progress asks first (you can rejoin from home).
+async function leave(conn) {
+  const g = conn.sync?.game;
+  if (g && !g.over && !await ask({ title: 'Leave the game?', text: 'You can rejoin from the home screen.', yes: 'Leave' })) return;
+  conn.leave({ forget: !g || !!g.over });
+}
+
 // Handing the role on gives away the controls (only the room's creator
 // can take it back), so ask first.
-function handOver(conn, id) {
+async function handOver(conn, id) {
   const room = conn.sync?.room;
   const p = room?.players.find((q) => q.id === id);
-  if (p && confirm(`Make ${p.name} the ${room.hostTitle || 'Game Master'}?`)) conn.handHost(id);
+  if (!p) return;
+  const title = room.hostTitle || 'Game Master';
+  const back = room.ownerId === conn.sync.you ? 'You made the room, so you can take it back any time.' : 'Only whoever made the room can take it back.';
+  if (await ask({ title: `Make ${p.name} the ${title}?`, text: `They get the controls. ${back}`, yes: 'Hand it over' })) conn.handHost(id);
 }
