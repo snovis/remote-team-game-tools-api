@@ -9,6 +9,7 @@ Everything a remote-team multiplayer party game needs **except the game**.
 - Client kit: connection + server clock, home/lobby screens, prize wheels, animation/confetti kit, toasts
 
 New session starting a game? Read **[HANDOFF.md](HANDOFF.md)** first.
+Looking for the next game to build? See **[IDEAS.md](IDEAS.md)**.
 
 Start with **[GAME_API.md](GAME_API.md)**, then copy
 [`examples/hidden-number`](examples/hidden-number).
