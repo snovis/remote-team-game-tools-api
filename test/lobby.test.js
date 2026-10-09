@@ -41,4 +41,8 @@ test('a game panel goes after the players; a watcher gets the summary and a clos
   const screen = renderLobby({ ...sync(null), watching: true }, { schema: fields });
   assert.match(screen, /rtg-summary/);
   assert.match(screen, /Close the big screen/);
+  // with nobody holding the role (hostId null), the big screen still isn't host
+  const orphan = sync(null);
+  orphan.room.hostId = null;
+  assert.doesNotMatch(renderLobby({ ...orphan, watching: true }, { schema: fields }), /data-rtg="start"|data-rtg-setting/);
 });

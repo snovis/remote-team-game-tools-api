@@ -52,7 +52,7 @@ export function renderHome({ title, tagline = '', logo = '', howTo = '' }, conn)
  */
 export function renderLobby(sync, { schema = [], minPlayers = 2, title = '', panel = '' } = {}) {
   const { room, you } = sync;
-  const host = room.hostId === you;
+  const host = !!you && room.hostId === you; // a big screen (you: null) never is
   const gm = room.hostTitle || 'Game Master';
   const fields = typeof schema === 'function' ? schema(room) : schema;
   const link = `${location.origin}${location.pathname}?room=${room.code}`;
