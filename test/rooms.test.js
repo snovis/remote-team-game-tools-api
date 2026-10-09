@@ -471,3 +471,99 @@ test('after Play again an autoStart room waits in the lobby like any other', () 
   assert.equal(calls.create.length, 2);
   rooms.stop();
 });
+
+// Watchers: a big screen sees the room without taking a seat.
+const watched = { ...secretGame, watchView: (state) => ({ count: Object.keys(state.secrets).length, screen: true }) };
+
+test('a watcher gets every sync and the watchView, with no seat', () => {
+  const { rooms, join } = setup({ secrets: watched });
+  const a = join(); a.say({ t: 'create', game: 'secrets', name: 'Ann' });
+  const { code } = a.last('joined');
+  const w = join(); w.say({ t: 'watch', code: code.toLowerCase() });
+  assert.deepEqual(w.last('watching'), { t: 'watching', code });
+  assert.equal(w.last('joined'), undefined, 'no seat, no token');
+  const lobby = w.last('sync');
+  assert.equal(lobby.you, null);
+  assert.equal(lobby.watching, true);
+  assert.equal(lobby.game, null);
+  assert.equal(lobby.room.players.length, 1, 'not a player');
+  assert.equal(a.last('sync').room.watchers, 1, 'players see a big screen is on');
+  const b = join(); b.say({ t: 'join', code, name: 'Bo' });
+  a.say({ t: 'start' });
+  b.say({ t: 'action', action: { type: 'set', value: 7 } });
+  assert.deepEqual(w.last('sync').game, { count: 1, screen: true }, 'the watchView, never a player view');
+  assert.equal(b.last('sync').game.mine, 7);
+  w.say({ t: 'action', action: { type: 'end' } });
+  assert.equal(w.last('error').message, 'The big screen only watches.');
+  assert.equal(b.last('sync').game.over, false);
+  rooms.stop();
+});
+
+test('watchers never hold the host role or count toward a full room', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const { rooms, join } = setup({ secrets: watched });
+  const a = join(); a.say({ t: 'create', game: 'secrets', name: 'Ann' });
+  const { code } = a.last('joined');
+  const w = join(); w.say({ t: 'watch', code });
+  const b = join(); b.say({ t: 'join', code, name: 'Bo' });
+  const c = join(); c.say({ t: 'join', code, name: 'Cy' });
+  assert.equal(c.last('sync').room.players.length, 3, 'maxPlayers 3, and the watcher took none of it');
+  a.close();
+  t.mock.timers.tick(HOST_GRACE_MS + 1);
+  rooms.tick();
+  assert.equal(w.last('sync').room.hostId, b.last('joined').playerId, 'the role went to a player');
+  rooms.stop();
+});
+
+test('a watcher can leave, and closing the window stops the watch', () => {
+  const { rooms, join } = setup({ secrets: watched });
+  const a = join(); a.say({ t: 'create', game: 'secrets', name: 'Ann' });
+  const { code } = a.last('joined');
+  const room = rooms.rooms.get(code);
+  const w = join(); w.say({ t: 'watch', code });
+  w.say({ t: 'leave' });
+  assert.equal(room.watchers.size, 0);
+  assert.equal(a.last('sync').room.watchers, 0);
+  assert.equal(room.players.length, 1, 'leaving as a watcher touches no seat');
+  const w2 = join(); w2.say({ t: 'watch', code });
+  w2.close();
+  assert.equal(room.watchers.size, 0);
+  rooms.stop();
+});
+
+test('watching needs a room and a game with a big screen', () => {
+  const { rooms, join } = setup({ secrets: secretGame, watched });
+  const w = join(); w.say({ t: 'watch', code: 'ZZZZ' });
+  assert.equal(w.last('watchFailed').message, 'No room with that code.');
+  const a = join(); a.say({ t: 'create', game: 'secrets', name: 'Ann' });
+  w.say({ t: 'watch', code: a.last('joined').code });
+  assert.equal(w.last('watchFailed').message, 'This game has no big screen.');
+  rooms.stop();
+});
+
+test('a watcher who joins takes a seat and stops watching', () => {
+  const { rooms, join } = setup({ secrets: watched });
+  const a = join(); a.say({ t: 'create', game: 'secrets', name: 'Ann' });
+  const { code } = a.last('joined');
+  const w = join(); w.say({ t: 'watch', code });
+  w.say({ t: 'join', code, name: 'Wren' });
+  assert.equal(rooms.rooms.get(code).watchers.size, 0);
+  assert.equal(w.last('sync').you, w.last('joined').playerId);
+  assert.equal(w.last('sync').room.players.length, 2);
+  rooms.stop();
+});
+
+test('when an empty room closes, its watchers are told', (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now: 1_000_000 });
+  const { rooms, join } = setup({ secrets: watched });
+  const a = join(); a.say({ t: 'create', game: 'secrets', name: 'Ann' });
+  const { code } = a.last('joined');
+  const w = join(); w.say({ t: 'watch', code });
+  a.close();
+  rooms.tick();
+  t.mock.timers.tick(31 * 60 * 1000);
+  rooms.tick();
+  assert.equal(rooms.rooms.has(code), false, 'a watcher alone does not keep a room open');
+  assert.equal(w.last('watchEnded').message, 'That room has closed.');
+  rooms.stop();
+});

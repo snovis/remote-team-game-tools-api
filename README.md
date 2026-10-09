@@ -2,10 +2,11 @@
 
 Everything a remote-team multiplayer party game needs **except the game**.
 
-- Jackbox-style rooms: 4-letter codes, invite links, lobby, host-only settings, room lock at start (or, per game, `autoStart` straight into play and `joinInProgress` so latecomers can join a running game)
+- Jackbox-style rooms: 4-letter codes, invite links, lobby, settings (the host's dropdowns, everyone else's one-line summary), room lock at start (or, per game, `autoStart` straight into play and `joinInProgress` so latecomers can join a running game)
 - Rejoin your seat after a disconnect or reload
 - A host role with a title ("Game Master", renamable per game) that survives a network blip (20 s grace), can be handed on, and can be taken back by the room's creator
 - 30 distinct player colors; server tick for timers; per-player views so hidden info stays hidden
+- Watchers: a big screen in its own window that sees the room without a seat, so the host can play in one window and share the other
 - Build sync: pages know which build they're on, reload after a deploy, and show a ✓/⚠ badge
 - Client kit: connection + server clock, home/lobby screens, prize wheels, animation/confetti kit, toasts, in-page yes/no questions
 

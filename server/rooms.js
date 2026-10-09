@@ -1,7 +1,7 @@
 // Game-agnostic room layer: Jackbox-style room codes, joining (mid-game too,
 // for games that allow it), rejoining, the host role (grace period,
-// hand-off, take-back), player colors, a server tick, and per-player sync
-// snapshots.
+// hand-off, take-back), player colors, a server tick, per-player sync
+// snapshots, and watchers (a big screen that sees the room without a seat).
 // A game plugs in as a module (see GAME_API.md); this file knows nothing
 // about any particular game.
 import crypto from 'node:crypto';
@@ -81,8 +81,9 @@ export class RoomManager {
     });
     ws.on('close', () => {
       this.sockets.delete(ws);
-      const { room, playerId } = ws.session || {};
-      if (room) room.detach(playerId, ws);
+      const { room, playerId, watcher } = ws.session || {};
+      if (room && watcher) room.unwatch(ws);
+      else if (room) room.detach(playerId, ws);
     });
   }
 
@@ -96,7 +97,17 @@ export class RoomManager {
 
   onMessage(ws, msg) {
     const fail = (message) => send(ws, { t: 'error', message });
+    // A watcher that creates or joins a room stops watching first.
+    if (['create', 'join', 'rejoin', 'watch'].includes(msg.t) && ws.session?.watcher) ws.session.room.unwatch(ws);
     switch (msg.t) {
+      case 'watch': {
+        // A big screen: sees the room and the game without taking a seat.
+        const room = this.rooms.get(String(msg.code || '').trim().toUpperCase());
+        if (!room) return send(ws, { t: 'watchFailed', message: 'No room with that code.' });
+        if (!room.game.watchView) return send(ws, { t: 'watchFailed', message: 'This game has no big screen.' });
+        room.watch(ws);
+        return;
+      }
       case 'create': {
         const game = this.games[msg.game];
         if (!game) return fail('Unknown game.');
@@ -134,17 +145,24 @@ export class RoomManager {
         return;
       }
     }
-    const { room, playerId } = ws.session || {};
+    const { room, playerId, watcher } = ws.session || {};
     if (!room) return fail('You are not in a room.');
+    if (watcher) {
+      if (msg.t === 'leave') room.unwatch(ws);
+      else fail('The big screen only watches.');
+      return;
+    }
     room.onMessage(playerId, msg, fail);
   }
 
   tick() {
     const now = Date.now();
     for (const [code, room] of this.rooms) {
+      // Watchers don't keep a room alive: with no players connected it
+      // waits, and after a while it closes and tells its watchers.
       if (room.players.every((p) => !p.ws)) {
         room.emptySince ??= now;
-        if (now - room.emptySince > EMPTY_ROOM_TTL_MS) this.rooms.delete(code);
+        if (now - room.emptySince > EMPTY_ROOM_TTL_MS) { room.close(); this.rooms.delete(code); }
         continue;
       }
       room.emptySince = null;
@@ -160,6 +178,7 @@ export class Room {
     this.gameId = gameId;
     this.game = game;
     this.players = [];
+    this.watchers = new Set(); // sockets watching without a seat (big screens)
     this.hostId = null;
     this.ownerId = null; // who created the room: can take the host role back
     this.hostAwaySince = null; // when the host's connection dropped
@@ -216,6 +235,31 @@ export class Room {
 
   player(id) {
     return this.players.find((p) => p.id === id);
+  }
+
+  // A watcher sees every sync (room, and the game's watchView) but has no
+  // seat: it isn't a player, can't be host, and doesn't count toward
+  // maxPlayers or keep the room alive.
+  watch(ws) {
+    this.watchers.add(ws);
+    ws.session = { room: this, watcher: true };
+    send(ws, { t: 'watching', code: this.code });
+    this.broadcast(); // everyone's watcher count changes
+  }
+
+  unwatch(ws) {
+    if (!this.watchers.delete(ws)) return;
+    if (ws.session?.room === this) ws.session = null;
+    this.broadcast();
+  }
+
+  // The room is going away: its watchers stop.
+  close() {
+    for (const ws of this.watchers) {
+      ws.session = null;
+      send(ws, { t: 'watchEnded', message: 'That room has closed.' });
+    }
+    this.watchers.clear();
   }
 
   get hostTitle() {
@@ -350,12 +394,17 @@ export class Room {
         // Latecomers can join while the game runs (the game's joinInProgress).
         joinInProgress: !!this.game.joinInProgress,
         players: ctx.players,
+        // How many big screens are watching (watchers, not players).
+        watchers: this.watchers.size,
       },
     };
     for (const p of this.players) {
       if (!p.ws) continue;
       send(p.ws, { ...base, you: p.id, game: this.state ? this.game.view(this.state, p.id, ctx) : null });
     }
+    if (!this.watchers.size) return;
+    const watched = { ...base, you: null, watching: true, game: this.state ? this.game.watchView(this.state, ctx) : null };
+    for (const ws of this.watchers) send(ws, watched);
   }
 }
 

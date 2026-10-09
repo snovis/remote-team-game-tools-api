@@ -1,6 +1,10 @@
 // Client side of the room protocol: one WebSocket, automatic reconnect and
 // rejoin, a server-synced clock, and the build check (badge + reload after
 // a deploy). Games build their UI on top of the `sync` snapshots this emits.
+// A page opened on ?room=ABCD&watch=1 watches that room instead (a big
+// screen): it gets every sync but has no seat, and leaves the player's saved
+// seat in this browser alone, so one browser can play in one window and
+// show the big screen in another.
 import { store } from './util.js';
 
 // The page's own build, stamped into <meta name="build" content="__BUILD__">
@@ -19,7 +23,10 @@ const shortBuild = (id) => (/^[0-9a-f]{7,}$/.test(id) ? id.slice(0, 7) : id.star
  */
 export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {}, onLeft = () => {}, badge = true }) {
   const SESSION_KEY = `rtg.${gameId}.session`;
-  const urlRoom = new URLSearchParams(location.search).get('room')?.toUpperCase() || '';
+  const params = new URLSearchParams(location.search);
+  const urlRoom = params.get('room')?.toUpperCase() || '';
+  // The room this page watches, if it's a big screen (see watch()).
+  let watching = params.has('watch') && urlRoom ? urlRoom : null;
   let ws = null;
   let retry = 0;
   let offset = 0;
@@ -34,6 +41,8 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
     urlRoom,
     get sync() { return sync; },
     get online() { return online; },
+    /** The room code this page is watching as a big screen, or null. */
+    get watching() { return watching; },
     /** Server time in ms. Use for every countdown and animation. */
     now: () => Date.now() + offset,
     session: () => store.get(SESSION_KEY),
@@ -51,6 +60,13 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
       const s = store.get(SESSION_KEY);
       if (s) send({ t: 'rejoin', code: s.code, token: s.token });
     },
+    /** Watch a room as a big screen: every sync, no seat. */
+    watch(code) {
+      watching = String(code).trim().toUpperCase();
+      send({ t: 'watch', code: watching });
+    },
+    /** The link that opens this room's big screen (for window.open). */
+    watchLink: (code = sync?.room.code) => `${location.origin}${location.pathname}?room=${code}&watch=1`,
     setSettings: (settings) => send({ t: 'settings', settings }),
     /** Host only: give the host role to another connected player. */
     handHost: (playerId) => send({ t: 'handHost', to: playerId }),
@@ -60,7 +76,9 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
     toLobby: () => send({ t: 'lobby' }),
     leave({ forget = true } = {}) {
       send({ t: 'leave' });
-      if (forget) store.del(SESSION_KEY);
+      // A big screen has no seat to forget; the player's seat stays saved.
+      if (watching) watching = null;
+      else if (forget) store.del(SESSION_KEY);
       sync = null;
       history.replaceState(null, '', location.pathname);
       onLeft();
@@ -78,6 +96,7 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
       online = true;
       retry = 0;
       onStatus(true);
+      if (watching) { send({ t: 'watch', code: watching }); return; }
       const s = store.get(SESSION_KEY);
       // Back into our room after a reconnect, or after a reload onto its URL.
       if (s && (sync || s.code === urlRoom)) send({ t: 'rejoin', code: s.code, token: s.token });
@@ -106,8 +125,20 @@ export function connect({ gameId, onSync, onError = () => {}, onStatus = () => {
           }
         }
         return;
+      case 'watching':
+        history.replaceState(null, '', `?room=${msg.code}&watch=1`);
+        return;
+      case 'watchFailed':
+      case 'watchEnded':
+        watching = null;
+        sync = null;
+        history.replaceState(null, '', location.pathname);
+        onError(msg.message);
+        onLeft();
+        return;
       case 'joined':
         pendingJoin = null;
+        watching = null;
         store.set(SESSION_KEY, { code: msg.code, token: msg.token });
         history.replaceState(null, '', `?room=${msg.code}`);
         return;

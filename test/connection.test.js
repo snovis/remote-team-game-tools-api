@@ -29,15 +29,16 @@ class ServerSocket extends EventEmitter {
 }
 
 // What connection.js gets from `new WebSocket(url)`: opens on the next
-// microtask, then hears the server's hello, like a real one.
+// microtask, with the server already holding its end (so what the page
+// sends from onopen arrives, as with a real one) and its hello on the way.
 class BrowserSocket {
   constructor() {
     this.readyState = 0;
     this.peer = new ServerSocket(this);
     queueMicrotask(() => {
       this.readyState = 1;
-      this.onopen?.();
       server.connect(this.peer);
+      this.onopen?.();
     });
   }
   send(data) { this.peer.emit('message', data); }
@@ -163,4 +164,46 @@ test('a locked game still says so on Join', async () => {
   assert.equal(conn.sync, null);
   assert.equal(session('locked'), null);
   rooms.stop();
+});
+
+const screenArena = { ...arena, watchView: (state) => ({ seats: state.seats, screen: true }) };
+
+test('a ?room=…&watch=1 page watches the room and leaves the saved seat alone', async () => {
+  storage.clear();
+  history.url = '/';
+  server = new RoomManager({ arena: screenArena }, { tickMs: 1e9 });
+  // Ann plays in one window of this browser…
+  location.search = '';
+  const ann = await page('arena');
+  ann.conn.create('Ann');
+  const { code } = ann.conn.sync.room;
+  const seat = session('arena');
+  // …and opens the big screen in another.
+  location.search = `?room=${code}&watch=1`;
+  const screen = await page('arena');
+  assert.equal(screen.conn.watching, code);
+  assert.equal(screen.conn.sync.you, null);
+  assert.deepEqual(screen.conn.sync.game, { seats: [ann.conn.sync.you], screen: true });
+  assert.deepEqual(session('arena'), seat, 'the player seat in this browser is untouched');
+  assert.equal(history.url, `?room=${code}&watch=1`);
+  assert.equal(ann.conn.sync.room.watchers, 1);
+  assert.equal(ann.conn.watchLink(), `undefined/?room=${code}&watch=1`.replace('undefined', location.origin));
+  // Closing the big screen keeps Ann's seat saved too.
+  screen.conn.leave();
+  assert.equal(screen.conn.watching, null);
+  assert.equal(screen.events.left, 1);
+  assert.deepEqual(session('arena'), seat);
+  assert.equal(ann.conn.sync.room.watchers, 0);
+  server.stop();
+});
+
+test('watching a room that is not there says so and goes home', async () => {
+  storage.clear();
+  server = new RoomManager({ arena: screenArena }, { tickMs: 1e9 });
+  location.search = '?room=ZZZZ&watch=1';
+  const { conn, events } = await page('arena');
+  assert.deepEqual(events.errors, ['No room with that code.']);
+  assert.equal(events.left, 1);
+  assert.equal(conn.watching, null);
+  server.stop();
 });

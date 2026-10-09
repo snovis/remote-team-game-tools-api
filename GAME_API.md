@@ -67,6 +67,10 @@ export function tick(state, ctx) { return false; }
 // What `playerId` is allowed to see. Called per player on every sync —
 // this is where hidden information stays hidden.
 export function view(state, playerId, ctx) { return {}; }
+
+// Optional: what a big screen sees (watchers, below). Without it, the
+// game has no big screen and watching its rooms is refused.
+export function watchView(state, ctx) { return {}; }
 ```
 
 `ctx` is `{ now, hostId, hostTitle, players: [{ id, name, color, connected }], isConnected(id) }`;
@@ -126,6 +130,28 @@ in the lobby are in `create()`, and a rejoin (saved token, including after
 Leave mid-game, which keeps the seat) takes back a seat without calling it.
 Sync's `room.joinInProgress` says whether the game lets latecomers in.
 
+### Watchers: a big screen in its own window
+
+A host on a video call wants to play in one window and share another: the
+whole race, the room code, the scores. A **watcher** is that second
+window. It sees the room without taking a seat: it isn't in
+`room.players`, can't hold the host role, doesn't count toward
+`maxPlayers`, can't act, and doesn't keep an empty room alive.
+
+- A game opts in by exporting `watchView(state, ctx)`, the watcher's view
+  of a running game (show everything public; never anyone's secrets).
+- Open `conn.watchLink()` (`?room=ABCD&watch=1`) in a new window, e.g.
+  `window.open(conn.watchLink(), 'big-screen', 'popup,width=1280,height=720')`.
+  That page watches instead of joining, and leaves the player's saved
+  seat in this browser alone, so the same browser can play and show the
+  big screen at once. It rewatches after a reconnect or a reload.
+- A watcher's sync has `you: null`, `watching: true`, and `game` from
+  `watchView` (`null` in the lobby). Every sync's `room.watchers` counts
+  the big screens, so the host can see one is on.
+- `conn.watching` is the code being watched (or `null`); `conn.leave()`
+  closes the big screen. If the room is gone, the page gets `onError`
+  ("No room with that code." / "That room has closed.") and `onLeft`.
+
 ### The host role
 
 One player at a time is the host: they change settings, start the game,
@@ -181,9 +207,9 @@ function render() {
 
 | Piece | What it does |
 |---|---|
-| `connect({ gameId, onSync, onError, onStatus, onLeft })` | One WebSocket; reconnects with backoff; rejoins your seat after a reconnect or a reload onto `?room=CODE`; `conn.join(code, name)` takes back your seat if you already have one in that room (else joins as someone new); `conn.now()` is server time; `conn.act(action)` sends to your `handle()`; `conn.handHost(id)` / `conn.takeHost()` move the host role. |
+| `connect({ gameId, onSync, onError, onStatus, onLeft })` | One WebSocket; reconnects with backoff; rejoins your seat after a reconnect or a reload onto `?room=CODE`; `conn.join(code, name)` takes back your seat if you already have one in that room (else joins as someone new); `conn.now()` is server time; `conn.act(action)` sends to your `handle()`; `conn.handHost(id)` / `conn.takeHost()` move the host role; `conn.watchLink()` / `conn.watch(code)` / `conn.watching` for a big screen (watchers, above). |
 | Build sync | The server says its build on connect. If the page is older it reloads once; a badge bottom-right shows `✓ <hash>` or a red "old version · tap to reload". |
-| `renderHome` / `renderLobby` / `bindShell` | Name + room code + create/join/rejoin; lobby with players (host labeled by title), invite link, hand-off / Take back, host-only settings (`schema`: `[{ key, label, options: [{ value, label }] }]` or a function of the room), Start. |
+| `renderHome` / `renderLobby` / `bindShell` | Name + room code + create/join/rejoin; lobby with players (host labeled by title), invite link, hand-off / Take back, settings, Start. Settings (`schema`: `[{ key, label, options: [{ value, label, short? }], summary? }]` or a function of the room) are dropdowns for the host only; everyone else sees one row of chips, each field's chosen option by its `short` label if it has one (`short: ''` leaves it out; `summary: false` leaves the field out). `settingsSummary(fields, settings)` gives you those words for your own screens. `renderLobby(sync, { panel })` places your game's own section (HTML, or a function of the sync) after the players: teams, a preview. |
 | `renderWheel(segments, spin, spinMs, t)` + `startWheels(root, conn.now, { onLand })` | Server-clock prize wheel with a ticking pointer. |
 | `fx` | `fx.play(selector, keyframes, opts)` (re-render-safe Web Animations), `fx.fly(fromRect, toRect)`, `fx.burstAt(el)`, `fx.confetti()`, `fx.countUp(selector, from, to)`. |
 | `esc`, `clock(ms)`, `toast(text)`, `store` | HTML escaping, `m:ss`, a toast, safe localStorage. |
@@ -192,9 +218,9 @@ function render() {
 `sync` looks like:
 
 ```js
-{ t: 'sync', serverNow, you,
-  room: { code, gameId, game, hostId, hostTitle, hostAway, hostAwayUntil, ownerId, settings, started, joinInProgress, players },
-  game: view(...) | null }
+{ t: 'sync', serverNow, you,           // you: null on a big screen (watching: true)
+  room: { code, gameId, game, hostId, hostTitle, hostAway, hostAwayUntil, ownerId, settings, started, joinInProgress, players, watchers },
+  game: view(...) | watchView(...) | null }
 ```
 
 `hostAwayUntil` is the server time the host's grace period ends (`null`
@@ -220,7 +246,7 @@ One Railway service per game, following a branch:
 ## 5. Installing
 
 ```sh
-npm install github:snovis/remote-team-game-tools-api#v0.3.0
+npm install github:snovis/remote-team-game-tools-api#v0.5.0
 ```
 
 Pin a tag or commit so an engine change never surprises a live game.

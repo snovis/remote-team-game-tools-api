@@ -42,9 +42,15 @@ export function renderHome({ title, tagline = '', logo = '', howTo = '' }, conn)
 
 /**
  * Settings schema: an array (or a function of the room returning one) of
- *   { key, label, options: [{ value, label }] }
+ *   { key, label, options: [{ value, label, short? }], summary? }
+ * The host gets a dropdown per field. Everyone else gets one line of what's
+ * picked: each field's chosen option, by its `short` label if it has one
+ * (an empty `short` leaves it out); `summary: false` leaves a field out.
+ *
+ * `panel` is the game's own lobby section (HTML, or a function of the sync
+ * returning HTML), placed after the players: teams, a preview, rules.
  */
-export function renderLobby(sync, { schema = [], minPlayers = 2, title = '' } = {}) {
+export function renderLobby(sync, { schema = [], minPlayers = 2, title = '', panel = '' } = {}) {
   const { room, you } = sync;
   const host = room.hostId === you;
   const gm = room.hostTitle || 'Game Master';
@@ -62,11 +68,14 @@ export function renderLobby(sync, { schema = [], minPlayers = 2, title = '' } = 
       ? `<div class="rtg-role rtg-take"><span class="rtg-muted">You made this room, so you can be ${esc(gm)} again any time.</span>
           <button class="rtg-btn small" data-rtg="takeHost">Take back</button></div>`
       : '';
-  const settings = fields.map((f) => `
+  const settings = host
+    ? `<div class="rtg-settings">${fields.map((f) => `
     <label class="rtg-field"><span>${esc(f.label)}</span>
-      <select data-rtg-setting="${esc(f.key)}" ${host ? '' : 'disabled'}>
+      <select data-rtg-setting="${esc(f.key)}">
         ${f.options.map((o) => `<option value="${esc(o.value)}" ${String(o.value) === String(room.settings[f.key]) ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
-      </select></label>`).join('');
+      </select></label>`).join('')}</div>`
+    : `<ul class="rtg-summary">${settingsSummary(fields, room.settings).map((x) => `<li>${esc(x)}</li>`).join('')}</ul>`;
+  const extra = typeof panel === 'function' ? panel(sync) : panel;
   const ready = room.players.filter((p) => p.connected).length >= minPlayers;
   const hostName = room.players.find((p) => p.id === room.hostId)?.name;
   const waiting = !hostName ? `Waiting for a ${gm}…`
@@ -85,16 +94,32 @@ export function renderLobby(sync, { schema = [], minPlayers = 2, title = '' } = 
       <ul class="rtg-players">${players}</ul>
       ${role}
     </section>
+    ${extra || ''}
     ${fields.length || host ? `<section class="rtg-panel">
-      ${fields.length ? `<h2>Game settings${host ? '' : ` <span class="rtg-note">${esc(gm)} picks</span>`}</h2><div class="rtg-settings">${settings}</div>` : ''}
+      ${fields.length ? `<h2>Game settings${host ? '' : ` <span class="rtg-note">${esc(gm)} picks</span>`}</h2>${settings}` : ''}
       ${host
         ? `<button class="rtg-btn primary wide" data-rtg="start" ${ready ? '' : 'disabled'}>Start game</button>
            <p class="rtg-muted rtg-center">${!ready ? `Waiting for ${minPlayers} players…`
              : room.joinInProgress ? 'Latecomers can still join once the game starts.' : 'The room locks once the game starts.'}</p>`
         : `<p class="rtg-muted rtg-center">${esc(waiting)}</p>`}
     </section>` : ''}
-    <button class="rtg-btn ghost small rtg-leave" data-rtg="leave">Leave room</button>
+    <button class="rtg-btn ghost small rtg-leave" data-rtg="leave">${sync.watching ? 'Close the big screen' : 'Leave room'}</button>
   </main>`;
+}
+
+/**
+ * What's picked, in a few words each: the chosen option of every field
+ * (its `short` label if it has one), skipping `summary: false` fields and
+ * empty shorts. For a game's own "here's the race" lines too.
+ */
+export function settingsSummary(fields, settings) {
+  return fields
+    .filter((f) => f.summary !== false)
+    .map((f) => {
+      const o = f.options.find((x) => String(x.value) === String(settings[f.key]));
+      return o ? (o.short ?? o.label) : '';
+    })
+    .filter(Boolean);
 }
 
 /**
